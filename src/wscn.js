@@ -121,6 +121,9 @@ export async function probeFeed(fetcher = fetch) {
     has_next_cursor: Boolean(data.nextCursor),
     latest: data.items.slice(0, 3).map(normalizeIndex),
     collected_at_bjt: formatBjt(Date.now()),
+    // Temporary connectivity diagnostics for prospective second source.
+    // Do not mistake response status for permission to aggregate articles.
+    ...(fetcher === fetch ? { caixin_source_probe: await probeCaixinSources() } : {}),
   };
 }
 
@@ -239,4 +242,56 @@ export async function getNewsById(id, fetcher = fetch, { datetimeBjt } = {}) {
     throw new Error('News ID not found in the latest 16 pages. Supply datetime_bjt from get_news_window_index for older news.');
   }
   throw new Error('News ID not found near the supplied datetime_bjt; it may have been edited or removed from the feed.');
+}
+
+
+/**
+ * TEMPORARY READ-ONLY DIAGNOSTIC
+ * Test two RSSHub category routes from this Cloudflare runtime, alongside
+ * the public Caixin category pages. No article contents are retained.
+ */
+async function probeCaixinSources() {
+  const sources = [
+    { name: 'finance_rss', url: 'https://rsshub.app/caixin/finance/news', kind: 'rss' },
+    { name: 'economy_rss', url: 'https://rsshub.app/caixin/economy/news', kind: 'rss' },
+    { name: 'finance_page', url: 'https://finance.caixin.com/news/', kind: 'web' },
+    { name: 'economy_page', url: 'https://economy.caixin.com/news/', kind: 'web' },
+  ];
+  return Promise.all(sources.map(async (source) => {
+    try {
+      const response = await fetch(source.url, {
+        method: 'GET', redirect: 'manual',
+        headers: {
+          Accept: source.kind === 'rss' ? 'application/rss+xml,application/xml,text/xml;q=0.9,*/*;q=0.7' : 'text/html,*/*;q=0.7',
+          'User-Agent': 'Mozilla/5.0',
+        },
+        signal: AbortSignal.timeout(7500),
+      });
+      const raw = await response.text();
+      const out = {
+        source: source.name, status: response.status,
+        content_type: response.headers.get('content-type') || '',
+        bytes: raw.length,
+        redirect_location: response.status >= 300 && response.status < 400
+          ? (response.headers.get('location') || '').slice(0, 200) : null,
+      };
+      if (source.kind !== 'rss' || response.status !== 200) return out;
+      // Only expose title and publication times for the first two entries.
+      const items = [...raw.matchAll(/<item\b[^>]*>([\s\S]*?)<\/item>/gi)].map(x => x[1]);
+      const value = (part, key) => {
+        const m = part.match(new RegExp('<' + key + '(?:\\s[^>]*)?>([\\s\\S]*?)<\\/' + key + '>', 'i'));
+        return m ? m[1].replace(/<!\[CDATA\[|\]\]>/g, '').replace(/<[^>]*>/g, '').trim() : '';
+      };
+      out.rss_item_count = items.length;
+      out.latest = items.slice(0, 2).map(p => ({
+        title: value(p, 'title').slice(0, 140),
+        published: value(p, 'pubDate').slice(0, 80),
+      }));
+      out.oldest_pubdate = items.length ? value(items[items.length - 1], 'pubDate').slice(0, 80) : '';
+      out.is_rss_or_atom = /<(rss|feed)\b/i.test(raw.slice(0, 3000));
+      return out;
+    } catch (err) {
+      return { source: source.name, error: String(err?.message || err).slice(0, 250) };
+    }
+  }));
 }
