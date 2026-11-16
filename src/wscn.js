@@ -297,7 +297,8 @@ async function probeCaixinSources() {
             out.index_api_status = apiResponse.status;
             if (apiResponse.status === 200) {
               const payload = await apiResponse.json();
-              const items = payload?.data?.datas;
+              const items = payload?.data?.datas ?? payload?.datas;
+              out.index_root_keys = Object.keys(payload || {}).slice(0, 12);
               out.index_schema_ok = Array.isArray(items);
               if (Array.isArray(items)) {
                 out.index_count = items.length;
@@ -309,6 +310,29 @@ async function probeCaixinSources() {
                 }));
                 out.index_last_pubdate = items.length ? String(items[items.length - 1].time || '').slice(0, 64) : '';
                 out.index_last_url = items.length ? String(items[items.length - 1].link || '').slice(0, 220) : '';
+                try {
+                  const nextUrl = new URL(endpoint.toString());
+                  nextUrl.searchParams.set('start', '25');
+                  const nextResponse = await fetch(nextUrl.toString(), {
+                    method: 'GET', redirect: 'manual',
+                    headers: { Accept: 'application/json', 'User-Agent': 'Mozilla/5.0' },
+                    signal: AbortSignal.timeout(7500),
+                  });
+                  out.index_page2_status = nextResponse.status;
+                  if (nextResponse.status === 200) {
+                    const nextPayload = await nextResponse.json();
+                    const older = nextPayload?.data?.datas ?? nextPayload?.datas;
+                    out.index_page2_schema_ok = Array.isArray(older);
+                    if (Array.isArray(older)) {
+                      out.index_page2_count = older.length;
+                      out.index_page2_first_date = older.length ? String(older[0].time || '') : '';
+                      out.index_page2_last_date = older.length ? String(older[older.length - 1].time || '') : '';
+                      out.index_page2_overlap = older.filter(z => items.some(a => a.link === z.link)).length;
+                    }
+                  }
+                } catch (error) {
+                  out.index_page2_error = String(error?.message || error).slice(0, 200);
+                }
               }
             }
           } catch (error) {
