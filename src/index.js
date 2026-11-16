@@ -20,7 +20,7 @@ function wrap(handler) {
 }
 
 function createServer() {
-  const server = new McpServer({ name: 'WallStreetCN Readonly News', version: '0.1.0' });
+  const server = new McpServer({ name: 'WallStreetCN Readonly News', version: '0.1.2' });
   const annotations = { readOnlyHint: true, destructiveHint: false, openWorldHint: true };
 
   server.registerTool('probe_news_source', {
@@ -40,11 +40,13 @@ function createServer() {
     getWindowIndex({ start, end, cursor: next_cursor, pagesPerCall: pages_per_call ?? 6 })));
 
   server.registerTool('get_news_by_id', {
-    description: 'Read-only. Fetch a WallStreetCN 7x24 news record by its verified numeric ID, including expanded (content_more) text and article/media references. Use only for selected items after reviewing a window index.',
+    description: 'Read-only. Retrieve selected news full body from the verified WallStreetCN 7x24 feed list, including content_more and media references. Prefer providing datetime_bjt copied from get_news_window_index for efficient historical lookup. Does not use the unreliable single-item endpoint.',
     inputSchema: {
-      id: z.string().regex(/^\d{1,20}$/).describe('Verified live-news ID returned by get_news_window_index'),
+      id: z.string().regex(/^\d{1,20}$/).describe('Verified news ID returned by get_news_window_index'),
+      datetime_bjt: z.string().regex(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/).optional().describe('Beijing publication time from index, e.g. 2026-11-15 17:59:29; strongly recommended for historical news'),
     }, annotations,
-  }, wrap(async ({ id }) => getNewsById(id)));
+  }, wrap(async ({ id, datetime_bjt }) =>
+    getNewsById(id, fetch, { datetimeBjt: datetime_bjt })));
 
   return server;
 }

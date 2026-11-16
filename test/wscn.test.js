@@ -49,11 +49,51 @@ test('no silent success when cursor ends early', async () => {
   await assert.rejects(() => getWindowIndex({ start: '2026-11-14 19:00:00', end: '2026-11-15 19:00:00' }, f), /No cursor/);
 });
 
-test('news by ID joins expanded HTML; probe reports valid data', async () => {
-  const f = fakeFeed({ __FIRST__: { items: [item(32001, '2026-11-15 18:01:00')], next_cursor: 'after' } });
+test('news by ID reads full body from feed list, not single-item endpoint', async () => {
+  const f = fakeFeed({ __FIRST__: { items: [item(32001, '2026-11-15 18:01:00', {
+    content: '<p>测试&amp;消息</p>', content_more: '<p>展开内容</p>',
+  })], next_cursor: 'after' } });
   const p = await probeFeed(f);
   assert.equal(p.received, 1);
   const d = await getNewsById('32001', f);
-  assert.match(d.content, /测试&消息/);
-  assert.match(d.content, /展开内容/);
+  assert.match(d.body_text, /测试&消息/);
+  assert.match(d.body_text, /展开内容/);
+  assert.equal(d.retrieval_source, 'verified_live_feed_list');
+  assert.equal(d.expanded_part_present, true);
+  assert.equal(d.pages_read, 1);
+});
+
+test('historical detail uses targeted timestamp cursor rather than replaying all pages', async () => {
+  const datetimeBjt = '2026-11-15 17:59:29';
+  const startCursor = String(epoch(datetimeBjt) + 3600);
+  const seen = [];
+  const f = async (url) => {
+    const u = new URL(url);
+    const cursor = u.searchParams.get('cursor');
+    seen.push(cursor);
+    assert.equal(cursor, startCursor);
+    return {ok: true, status: 200, json: async () => ({data: {items: [
+      item(3200191, '2026-11-15 18:16:14'),
+      item(3200190, datetimeBjt, {
+        title: '闻泰公告', content: '<p>第一段</p>', content_more: '<p>完整展开</p>',
+        images: [{uri:'https://example.com/image.jpg'}],
+      }),
+    ], next_cursor: 'older'}})};
+  };
+  const out = await getNewsById('3200190', f, {datetimeBjt});
+  assert.deepEqual(seen, [startCursor]);
+  assert.equal(out.title, '闻泰公告');
+  assert.equal(out.datetime_bjt, datetimeBjt);
+  assert.match(out.body_text, /完整展开/);
+  assert.equal(out.id, '3200190');
+  assert.equal(out.pages_read, 1);
+  assert.equal(out.images.length, 1);
+});
+
+test('mislocated ID returns explicit error and does not invent a match', async () => {
+  const datetimeBjt = '2026-11-15 17:59:29';
+  const f = fakeFeed({ [String(epoch(datetimeBjt) + 3600)]: {
+    items: [item(3200191, '2026-11-15 17:58:00')], next_cursor: 'older',
+  }});
+  await assert.rejects(() => getNewsById('3200190', f, {datetimeBjt}), /not found near/);
 });

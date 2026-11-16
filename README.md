@@ -1,14 +1,14 @@
 # 华尔街见闻快讯 MCP｜云端只读插件 MVP
 
-版本：0.1.0（2026-11-16）  
-状态：**本地纯逻辑测试通过；Cloudflare 构建、Cloudflare→华尔街见闻联网和 ChatGPT 插件联调尚未完成。**
+版本：0.1.2（2026-11-16）  
+状态：**新闻索引和指定窗口已通过在线调用；v0.1.2 修复单条正文读取，待线上验证。**
 
 ## 目标
 
 - ChatGPT 通过 MCP **按需**读取华尔街见闻 **7×24／要闻**频道的新快讯。
 - 接口采取**时间窗口＋游标分页**，不依赖关键词检索。
 - **先全部发现，后由情报官筛选**。取回记录包含：快讯 ID、北京时间、平台重要度、标题、正文预览、原始链接。
-- 只对通过筛选的条目使用 `get_news_by_id` 获取完整展开正文。
+- 只对通过筛选的条目使用 `get_news_by_id(id, datetime_bjt?)` 获取正文；建议同时传入索引中的发布时间，避免从最新页回溯。
 - MCP **不做写入、抓取计划或持久化**。ChatGPT 继续通过现有 Google Drive 插件归档；原来的 Google Apps Script 可保留为独立定时备份。
 
 ## 文件结构
@@ -135,3 +135,8 @@ https://wallstreetcn-readonly-mcp.<你的账户>.workers.dev
 - https://developers.cloudflare.com/workers/ci-cd/builds/
 - https://developers.openai.com/api/docs/guides/custom-mcp-server
 - https://github.com/InphinitiZ/wallstreetcn-cli
+
+
+## v0.1.2 正文检索修复
+
+`get_news_by_id` 不再使用可能返回空对象的单条详情接口，改用已验收的列表接口，从时间戳游标开始定向查找 ID，并合并 `content` 和 `content_more` 输出到 `body_text`。请求旧新闻推荐传 `datetime_bjt`。已通过本地模拟测试，线上全文验收仍需进行。

@@ -1,6 +1,6 @@
 {
   "name": "wallstreetcn-readonly-mcp",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "private": true,
   "type": "module",
   "description": "Read-only WallStreetCN incremental news MCP on Cloudflare Workers",

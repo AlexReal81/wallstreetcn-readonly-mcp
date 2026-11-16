@@ -188,9 +188,55 @@ export async function getWindowIndex({ start, end, cursor, pagesPerCall = 6 }, f
   };
 }
 
-export async function getNewsById(id, fetcher = fetch) {
-  if (!/^\d{1,20}$/.test(String(id))) throw new Error('ID must be digits');
-  const data = await fetchPayload(`${UPSTREAM}/${encodeURIComponent(String(id))}`, fetcher);
-  if (data.id == null || String(data.id) !== String(id)) throw new Error('Unexpected detail record');
-  return normalizeDetail(data);
+/**
+ * Full-text lookup through the same list endpoint as the working index tool.
+ * Provide the index timestamp to avoid scanning unrelated historical pages.
+ */
+export async function getNewsById(id, fetcher = fetch, { datetimeBjt } = {}) {
+  const targetId = String(id);
+  if (!/^\d{1,20}$/.test(targetId)) throw new Error('ID must be digits');
+  const targetMs = datetimeBjt == null ? null : parseBjt(datetimeBjt);
+  if (targetMs != null && targetMs > Date.now()) throw new Error('datetime_bjt must not be in the future');
+
+  // A one-hour head start enables fast lookups of older published items.
+  let cursor = targetMs == null ? null : String(Math.floor(targetMs / 1000) + 3600);
+  const maxPages = targetMs == null ? 16 : 8;
+  const seenCursors = new Set();
+
+  for (let pageNo = 1; pageNo <= maxPages; pageNo++) {
+    const key = cursor == null ? '__FIRST__' : cursor;
+    if (seenCursors.has(key)) throw new Error('Cursor loop while locating news ID');
+    seenCursors.add(key);
+
+    const page = await fetchPage(cursor, fetcher);
+    if (!page.items.length) break;
+
+    let previousTs = Infinity;
+    for (const raw of page.items) {
+      const ts = ensureTimestamp(raw);
+      if (ts > previousTs) throw new Error('Unsorted feed page while locating news ID');
+      previousTs = ts;
+      if (String(raw.id ?? '') !== targetId) continue;
+
+      const detail = normalizeDetail(raw);
+      const { content, ...metadata } = detail;
+      return {
+        ...metadata,
+        body_text: content,
+        retrieval_source: 'verified_live_feed_list',
+        expanded_part_present: Boolean(raw.content_more),
+        pages_read: pageNo,
+      };
+    }
+
+    const oldestMs = ensureTimestamp(page.items[page.items.length - 1]);
+    if (targetMs != null && oldestMs < targetMs - 60_000) break;
+    if (!page.nextCursor) break;
+    cursor = page.nextCursor;
+  }
+
+  if (targetMs == null) {
+    throw new Error('News ID not found in the latest 16 pages. Supply datetime_bjt from get_news_window_index for older news.');
+  }
+  throw new Error('News ID not found near the supplied datetime_bjt; it may have been edited or removed from the feed.');
 }
