@@ -1,6 +1,6 @@
 # 华尔街见闻快讯 MCP｜云端只读插件 MVP
 
-版本：0.1.2（2026-11-16）  
+版本：0.1.3（2026-11-16）  
 状态：**新闻索引和指定窗口已通过在线调用；v0.1.2 修复单条正文读取，待线上验证。**
 
 ## 目标
@@ -140,3 +140,12 @@ https://wallstreetcn-readonly-mcp.<你的账户>.workers.dev
 ## v0.1.2 正文检索修复
 
 `get_news_by_id` 不再使用可能返回空对象的单条详情接口，改用已验收的列表接口，从时间戳游标开始定向查找 ID，并合并 `content` 和 `content_more` 输出到 `body_text`。请求旧新闻推荐传 `datetime_bjt`。已通过本地模拟测试，线上全文验收仍需进行。
+
+
+## v0.1.3 · 财新两栏目公开文章目录（第二新闻源试验）
+
+新增只读 MCP 工具 `get_caixin_window_index(section,start,end,next_offset?,pages_per_call?)`：支持 `finance`（金融·要闻）和 `economy`（经济·要闻），北京时间左闭右开，25篇/页，按官方栏目 ID 的公开目录接口回溯直到跨过窗口起点。返回标题、公开摘要、发布时间到秒、URL、栏目，不采集付费正文或整个财新网站。不使用 RSSHub 公共实例（2026-11-16 在 Cloudflare 返回 HTTP 403）。
+
+财新原始目录通过 `gateway.caixin.com/api/extapi/homeInterface.jsp`（非公开文档接口）获取，接口、栏目 ID、访问条件可能变化，源码仅做有限个人研究性读取，正式长期自动化及再利用仍需核对财新的许可条件。记录中的 `complete=true` 仅表示当前列表顺序完整跨过起点，不等于出版社绝对未漏发/改动文章。不要直接声称全站覆盖。
+
+部署后可能需要在 ChatGPT 中刷新自定义 MCP 插件的工具定义，才能看到新增工具。
