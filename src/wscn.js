@@ -121,7 +121,6 @@ export async function probeFeed(fetcher = fetch) {
     has_next_cursor: Boolean(data.nextCursor),
     latest: data.items.slice(0, 3).map(normalizeIndex),
     collected_at_bjt: formatBjt(Date.now()),
-    ...(fetcher === fetch ? {reuters_rss_probe: await probeReutersRss()} : {}),
   };
 }
 
@@ -240,70 +239,4 @@ export async function getNewsById(id, fetcher = fetch, { datetimeBjt } = {}) {
     throw new Error('News ID not found in the latest 16 pages. Supply datetime_bjt from get_news_window_index for older news.');
   }
   throw new Error('News ID not found near the supplied datetime_bjt; it may have been edited or removed from the feed.');
-}
-
-
-/**
- * TEMPORARY RSS metadata connectivity test. Do not copy or cache article text.
- * Google News feed is a third-party search result, NOT a Reuters official feed.
- */
-async function probeReutersRss() {
-  const searches = [
-    {name: 'reuters_all', q: 'when:24h site:reuters.com'},
-    {name: 'reuters_world', q: 'when:24h site:reuters.com/world/'},
-    {name: 'reuters_markets', q: 'when:24h site:reuters.com/markets/'},
-    {name: 'reuters_business', q: 'when:24h site:reuters.com/business/'},
-  ];
-  const decode = (v) => String(v || '')
-    .replace(/<!\[CDATA\[/g, '').replace(/\]\]>/g, '')
-    .replace(/<[^>]+>/g, '').replace(/&amp;/g, '&')
-    .replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'")
-    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').trim();
-  const pick = (item,tag) => {
-    const m = item.match(new RegExp('<' + tag + '(?:\\s[^>]*)?>([\\s\\S]*?)<\\/' + tag + '>', 'i'));
-    return m ? decode(m[1]) : '';
-  };
-  return Promise.all(searches.map(async ({name,q}) => {
-    const url = 'https://news.google.com/rss/search?q=' + encodeURIComponent(q)
-       + '&hl=en-US&gl=US&ceid=US%3Aen';
-    try {
-      const resp = await fetch(url, {
-        redirect: 'manual', method: 'GET',
-        headers: {Accept:'application/rss+xml,application/xml;q=0.9,*/*;q=0.5',
-          'User-Agent':'Mozilla/5.0'},
-        signal: AbortSignal.timeout(10000),
-      });
-      const body = await resp.text();
-      const data = {
-        name, status:resp.status, content_type:resp.headers.get('content-type') || '',
-        response_chars:body.length, rss_valid: /<(rss|feed)\b/i.test(body.slice(0,3000)),
-      };
-      if (resp.status !== 200 || !data.rss_valid) {
-        data.error_hint = body.slice(0,120).replace(/\s+/g,' ');
-        return data;
-      }
-      const items = [...body.matchAll(/<item\b[^>]*>([\s\S]*?)<\/item>/gi)].map(x=>x[1]);
-      data.item_count = items.length;
-      const dates = items.map(i => Date.parse(pick(i,'pubDate'))).filter(Number.isFinite);
-      data.newest_iso = dates.length ? new Date(Math.max(...dates)).toISOString() : null;
-      data.oldest_iso = dates.length ? new Date(Math.min(...dates)).toISOString() : null;
-      data.items_missing_pubdate = items.length - dates.length;
-      const sources = {};
-      for (const it of items) {
-        const source = pick(it,'source') || '(none)';
-        sources[source] = (sources[source] || 0) + 1;
-      }
-      data.source_counts = Object.entries(sources).sort((a,b) => b[1]-a[1]).slice(0,7);
-      data.first_three = items.slice(0,3).map(it => ({
-        title:pick(it,'title').slice(0,150),
-        pubdate:pick(it,'pubDate').slice(0,80),
-        source:pick(it,'source').slice(0,100),
-        link:pick(it,'link').slice(0,210),
-        guid:pick(it,'guid').slice(0,120),
-      }));
-      return data;
-    } catch (e) {
-      return {name,error:String(e?.message||e).slice(0,220)};
-    }
-  }));
 }
