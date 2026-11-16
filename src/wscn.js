@@ -88,7 +88,7 @@ export function normalizeDetail(raw) {
 async function fetchPayload(url, fetcher = fetch) {
   const response = await fetcher(url, {
     method: 'GET',
-    redirect: 'error',
+    redirect: 'manual',
     headers: {
       Accept: 'application/json',
       'User-Agent': 'Mozilla/5.0',
