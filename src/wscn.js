@@ -275,6 +275,48 @@ async function probeCaixinSources() {
         redirect_location: response.status >= 300 && response.status < 400
           ? (response.headers.get('location') || '').slice(0, 200) : null,
       };
+      if (source.kind === 'web' && response.status === 200) {
+        out.page_title = (raw.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || '').slice(0, 160);
+        const em = raw.match(/var\s+entity\s*=\s*(\{[^\n]*?\})\s*;?/i);
+        let entity;
+        try { entity = em ? JSON.parse(em[1]) : null; } catch { entity = null; }
+        out.has_category_entity = Boolean(entity);
+        out.entity_id = entity?.id ?? null;
+        if (entity?.id && /^\d+$/.test(String(entity.id))) {
+          const endpoint = new URL('https://gateway.caixin.com/api/extapi/homeInterface.jsp');
+          endpoint.search = new URLSearchParams({
+            subject: String(entity.id), type: '0', count: '25',
+            picdim: '_266_177', start: '0',
+          }).toString();
+          try {
+            const apiResponse = await fetch(endpoint.toString(), {
+              method: 'GET', redirect: 'manual',
+              headers: { Accept: 'application/json', 'User-Agent': 'Mozilla/5.0' },
+              signal: AbortSignal.timeout(7500),
+            });
+            out.index_api_status = apiResponse.status;
+            if (apiResponse.status === 200) {
+              const payload = await apiResponse.json();
+              const items = payload?.data?.datas;
+              out.index_schema_ok = Array.isArray(items);
+              if (Array.isArray(items)) {
+                out.index_count = items.length;
+                out.index_first = items.slice(0, 2).map(x => ({
+                  title: String(x.desc || '').slice(0, 140),
+                  published: String(x.time || '').slice(0, 64),
+                  url: String(x.link || '').slice(0, 220),
+                  summary_preview: String(x.summ || '').slice(0, 140),
+                }));
+                out.index_last_pubdate = items.length ? String(items[items.length - 1].time || '').slice(0, 64) : '';
+                out.index_last_url = items.length ? String(items[items.length - 1].link || '').slice(0, 220) : '';
+              }
+            }
+          } catch (error) {
+            out.index_api_error = String(error?.message || error).slice(0, 200);
+          }
+        }
+        return out;
+      }
       if (source.kind !== 'rss' || response.status !== 200) return out;
       // Only expose title and publication times for the first two entries.
       const items = [...raw.matchAll(/<item\b[^>]*>([\s\S]*?)<\/item>/gi)].map(x => x[1]);
